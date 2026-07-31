@@ -1,0 +1,99 @@
+# Databricks App Configuration
+# Single combined app serving Lakemeter (cost estimation) and the ported
+# databricks-cost-observability module (cost/governance observability)
+# from one FastAPI process. See satsyil_lakemeterplus/docs/merge-tasks.md
+# task #14 for what's still unreconciled here.
+#
+# NOTE: the source repos both hardcoded environment-specific values
+# (a workspace URL, a demo warehouse ID) directly in this file. Those have
+# been replaced below with empty values / valueFrom secret placeholders —
+# fill them in per-deployment, do not hardcode a specific workspace here.
+
+command:
+  - "/bin/bash"
+  - "-c"
+  - "PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*' --access-log"
+
+env:
+  # Environment flag - controls logging verbosity and docs visibility
+  - name: "ENVIRONMENT"
+    value: "production"
+
+  # ── Lakemeter (Lakebase / estimation module) ──────────────────────────────
+  - name: "DATABRICKS_HOST"
+    value: ""   # set per-deployment; do not hardcode a workspace URL here
+  - name: "DATABRICKS_SECRETS_SCOPE"
+    valueFrom: "lakemeter-secrets-scope"
+  - name: "LAKEBASE_INSTANCE_NAME"
+    valueFrom: "lakemeter-lakebase-instance"
+  - name: "DB_HOST"
+    valueFrom: "lakemeter-db-host"
+  - name: "DB_USER"
+    valueFrom: "lakemeter-db-user"
+  - name: "DB_NAME"
+    valueFrom: "lakemeter-db-name"
+  - name: "DB_PORT"
+    value: "5432"
+  - name: "DB_SSLMODE"
+    value: "require"
+  - name: "SP_CLIENT_ID_KEY"
+    value: "sp_clientid"
+  - name: "SP_SECRET_KEY"
+    value: "sp_secret"
+  - name: "CLAUDE_MODEL_ENDPOINT"
+    valueFrom: "lakemeter-claude-endpoint"
+
+  # CORS - empty for same-origin (combined deployment)
+  - name: "CORS_ORIGINS"
+    value: ""
+
+  # ── Cost-observability module (Unity Catalog system tables) ───────────────
+  # Set to "true" for demo/dev (uses mock_system_* tables), "false" once real
+  # system-table access + a warehouse ID are configured.
+  - name: "MOCK_MODE"
+    value: "true"
+  - name: "LOG_LEVEL"
+    value: "info"
+
+  - name: "DATABRICKS_WAREHOUSE_ID"
+    valueFrom: "observability-warehouse-id"   # set via: databricks apps set-secret <app> observability-warehouse-id <id>
+  - name: "UC_CATALOG_NAME"
+    value: "workspace"
+  - name: "DATABRICKS_ACCOUNT_ID"
+    value: ""
+
+  # Comma-separated list of emails allowed to use the observability module.
+  # Leave empty to allow all workspace-authenticated users.
+  - name: "ALLOWED_USERS"
+    value: ""
+  # Comma-separated workspace IDs the observability module may query billing
+  # data for. Empty = current workspace only. "*" = unrestricted admin mode.
+  - name: "ALLOWED_WORKSPACE_IDS"
+    value: "*"
+  # Comma-separated emails with Admin-panel access (observability module).
+  - name: "ADMIN_USERS"
+    value: "${var.admin_users}"
+  # JSON mapping of Databricks numeric user IDs to emails — manual fallback.
+  - name: "USER_ID_MAP"
+    value: '{}'
+
+  # ── Cost Alert Email Settings (observability module) ──────────────────────
+  - name: "SMTP_HOST"
+    value: "smtp.gmail.com"
+  - name: "SMTP_PORT"
+    value: "587"
+  - name: "SMTP_USER"
+    value: ""   # set via: databricks apps set-secret <app> SMTP_USER <value>
+  - name: "SMTP_PASSWORD"
+    value: ""   # set via: databricks apps set-secret <app> SMTP_PASSWORD <value>
+  - name: "ALERT_EMAIL_TO"
+    value: ""
+  - name: "ALERT_THRESHOLD_PCT"
+    value: "20"
+  - name: "APP_URL"
+    value: ""
+
+# Resource allocation (optional - uses defaults if not specified)
+# resources:
+#   num_cpus: 1
+#   memory_mb: 2048

@@ -131,8 +131,8 @@ def get_service() -> Optional[UserPermissionsService]:
     with _singleton_lock:
         if _singleton is None:
             try:
-                from core.dependencies import get_workspace_client
-                from core.config import get_settings
+                from app.observability.core.dependencies import get_workspace_client
+                from app.observability.core.config import get_settings
                 settings = get_settings()
                 _singleton = UserPermissionsService(
                     get_workspace_client(),

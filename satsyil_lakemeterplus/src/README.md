@@ -4,7 +4,7 @@ This is a **work-in-progress merge** of `lakemeter-oss` (cost estimation) and
 `databricks-cost-observability` (cost/governance observability) into one
 Databricks App. See `../docs/` for the architecture diagrams, feature
 comparison, and full merge task plan this scaffold implements against
-(`../docs/merge-tasks.md` now carries a Status column per task).
+(`../docs/merge-tasks.md` carries a Status column per task).
 Remaining work is tracked in `../docs/TODO.md`. Licensing: see
 `../LICENSE` and `../NOTICE.md`.
 
@@ -15,101 +15,114 @@ Remaining work is tracked in `../docs/TODO.md`. Licensing: see
   production). This owns estimates, line items, workload calculators, the
   AI assistant, and export.
 - **`backend/app/config.py`** — the **single, unified `Settings` class** for
-  the whole app. Originally Lakemeter's own config, extended with all of
-  the observability module's fields (`MOCK_MODE` is handled separately —
-  see below — plus `DATABRICKS_WAREHOUSE_ID`, `ALLOWED_USERS`,
+  the whole app: Lakemeter's own config, extended with all of the
+  observability module's fields (`DATABRICKS_WAREHOUSE_ID`, `ALLOWED_USERS`,
   `ADMIN_USERS`, `ALLOWED_WORKSPACE_IDS`, cloud-cost credentials, SMTP/alert
-  vars, etc.) and their property helpers (`admin_users_set`,
-  `user_configs_dict`, ...).
+  vars, etc.) and their property helpers.
 - **`backend/app/observability/`** — the **ported cost-observability module**,
-  namespaced as its own Python package so it can't collide with Lakemeter's
-  code:
-  - `observability/core/config.py` — **not** a second settings class; a thin
-    shim where `get_settings()` returns the same instance as
-    `app.config.settings`, so the module's ~14 files that import
-    `get_settings()` from here didn't need individual rewrites.
-  - `observability/core/{dependencies,security,sql_executor,subscriptions,validators}.py` —
-    ported from `databricks-cost-observability-main/core/`, imports rewritten.
+  namespaced as its own Python package:
+  - `observability/core/config.py` — a thin shim; `get_settings()` returns
+    the same instance as `app.config.settings`, so the ~14 files that
+    import it didn't need individual rewrites.
+  - `observability/core/{dependencies,security,sql_executor,subscriptions,validators,allowlist}.py` —
+    ported from `databricks-cost-observability-main`'s `core/` and `app.py`.
     `security.py`'s `HTTPSRedirectMiddleware`, `SecurityHeadersMiddleware`,
-    and `AuditLogMiddleware` are wired into `main.py`, app-wide.
-  - `observability/routes/` — the 20 `api/v1/*.py` routers, ported.
-  - `observability/services/` — the 18 `services/*.py` business-logic modules, ported.
-  - `observability/router.py` — aggregates all of the above into one `api_router`,
-    each sub-router keeping its own prefix (`/cost`, `/executive`, `/admin`, ...)
+    `AuditLogMiddleware` are wired into `main.py` app-wide;
+    `allowlist.py`'s `ObservabilityAllowlistMiddleware` enforces
+    `ALLOWED_USERS`, but **only** on `/api/v1/observability/*` — see
+    "What is deliberately not merged" below.
+  - `observability/routes/` (20 files) and `observability/services/` (18
+    files, plus `alert_email.py` — see task #15 below) — ported and wired.
+  - `observability/router.py` — aggregates routes into one `api_router`
     under a shared `/observability` prefix.
-  - `observability/scripts/` — mock/demo data generators (`setup_mock_tables.py`,
-    `setup_enterprise_mock_data.py`, `send_cost_alerts.py`). The hardcoded
-    demo warehouse ID these originally fell back to
-    (`21f5bd20b7f44a51`) was removed — `DATABRICKS_WAREHOUSE_ID` is now a
-    required env var here, same as `DATABRICKS_HOST`/`DATABRICKS_TOKEN`.
-  - `observability/notebooks/` — cloud-cost ingestion and data-loading notebooks, ported as-is.
+  - `observability/scripts/` — mock/demo data generators and the
+    standalone `send_cost_alerts.py` scheduled-job script (now reuses
+    `AlertService` + `alert_email.py` instead of its own independent
+    implementation — see task #15). The hardcoded demo warehouse ID these
+    originally fell back to was removed in favor of a required env var.
+  - `observability/notebooks/` — cloud-cost ingestion notebooks, ported as-is.
 - **`backend/app/auth/databricks_auth.py`** and
   **`backend/app/observability/core/dependencies.py`** — still two separate
-  identity-resolution code paths (see below), but their proxy-header lists
-  (`EMAIL_HEADERS`/`USER_HEADERS` vs. `_USER_HEADERS`) were extended to the
-  **union** of both, closing a real bug where a user's identity could
-  silently resolve to empty in one module depending on which header
-  Databricks Apps happened to send.
-- **`backend/app/main.py`** — Lakemeter's original entrypoint, with:
-  `app.include_router(observability_router, prefix="/api/v1")` (observability
-  live at `/api/v1/observability/*`), plus the three security middlewares
-  above added app-wide, outermost-to-innermost ahead of CORS.
+  identity-resolution code paths, but their proxy-header lists were
+  extended to the **union** of both, closing a real bug where a user's
+  identity could silently resolve to empty in one module depending on
+  which header Databricks Apps sent.
+- **`backend/app/main.py`** — Lakemeter's entrypoint, with the observability
+  router mounted at `/api/v1/observability/*` and five middlewares added,
+  outermost to innermost: `HTTPSRedirect → SecurityHeaders → AuditLog →
+  ObservabilityAllowlist → CORS`.
 - **`frontend/`** — Lakemeter's React/TS/Vite SPA. One observability page
-  added as a proof of concept: `frontend/src/pages/Observability.tsx` (KPI
-  cards from `/api/v1/observability/cost/summary`, raw JSON preview of
-  `/api/v1/observability/executive/summary`), `frontend/src/api/observability.ts`
-  (typed client), a `/observability` route, and a nav entry in `Layout.tsx`.
-  The other ~16 observability domains have no frontend yet.
+  added as a proof of concept: `frontend/src/pages/Observability.tsx`,
+  `frontend/src/api/observability.ts`, a `/observability` route, and a nav
+  entry. The other ~16 observability domains have no frontend yet.
 - **`scripts/`, `pyproject.toml`, `requirements.txt`, `backend/app.yaml`** —
-  Lakemeter's installer/DAB/deployment files, with the observability
-  module's Python dependencies (`scikit-learn`, `numpy`) and environment
-  variables (`MOCK_MODE`, `ALLOWED_USERS`, `ADMIN_USERS`, SMTP/alert vars,
-  etc.) merged in. Hardcoded environment-specific values found in the
-  source repos (a specific workspace URL, the demo warehouse ID) were
-  **removed and replaced with placeholders** rather than carried forward —
-  fill them in per deployment. `scripts/databricks.yml` (the DAB) itself is
-  still Lakemeter's original, unmerged with cost-observability's simpler
-  bundle — see TODO.
+  Lakemeter's installer/DAB/deployment files, dependencies and env vars
+  unioned with the observability module's. Hardcoded environment-specific
+  values found in the source repos were removed in favor of placeholders.
+  `scripts/databricks.yml` (the DAB) is still Lakemeter's original,
+  unmerged with cost-observability's simpler bundle — see TODO.
+- **`tests/`** — a new test suite (26 tests) covering the merge work itself:
+  route wiring, middleware order, config sharing, the observability
+  allowlist's scoping, and (previously completely untested)
+  `AlertService.detect_spikes()`'s spike-detection math. Does **not**
+  include either source repo's own pre-existing test suite. Run with
+  `python -m pytest` from `src/` (uses `pyproject.toml`'s
+  `pythonpath = ["backend"]`).
+- **`.github/workflows/ci.yml`** — compiles + runs the Python test suite,
+  and builds the frontend, on every push/PR touching `src/`.
 
 ## What is deliberately *not* merged (yet)
 
 - **Data-access layers stay separate**: the observability module talks to
   Unity Catalog `system.*` tables via the Databricks SDK Statement Execution
-  API; Lakemeter talks to Lakebase via SQLAlchemy. These are intentionally
-  **not** being unified into one data layer — see `../docs/merge-tasks.md`
-  ("Explicitly out of scope").
-- **Identity resolution stays two functions**: header lists are unified (see
-  above), but Lakemeter's DB-backed `get_or_create_user()` and the
-  observability module's stateless `resolve_user_identity()` are still
-  separate code paths, not one shared resolver.
+  API; Lakemeter talks to Lakebase via SQLAlchemy. Intentionally **not**
+  unified — see `../docs/merge-tasks.md` ("Explicitly out of scope").
+- **Identity resolution stays two functions**: header lists are unified,
+  but Lakemeter's DB-backed `get_or_create_user()` and the observability
+  module's stateless `resolve_user_identity()` are separate code paths.
 - **Authorization gating stays scoped to `/observability/*`**:
-  `ALLOWED_USERS`/`ADMIN_USERS` are on the unified `Settings`, but
-  cost-observability's actual authz gate (`AllowlistMiddleware`) was
-  deliberately **not** applied app-wide — doing so would change access
-  control for Lakemeter's own estimation routes too, which is a product
-  decision, not a mechanical port.
+  `ObservabilityAllowlistMiddleware` enforces `ALLOWED_USERS` only on
+  observability routes — applying it (or an equivalent) to Lakemeter's own
+  estimation routes too is a product decision, not made here.
 
 See `../docs/TODO.md` for the full remaining list.
 
 ## Verified so far
 
-- Every ported `.py` file compiles (`python -m py_compile`).
-- **Verified by actually running it**: installed both modules' dependencies
-  into a scratch virtualenv and imported `app.main` for real
-  (`PYTHONPATH=. python3 -c "import app.main"`). It imports cleanly.
-  `app.openapi()` reports **136 total routes**, **48** of them under
-  `/api/v1/observability/*`, zero prefix collisions with Lakemeter's own
-  routes. `app.user_middleware` reports the expected stack:
-  `['HTTPSRedirectMiddleware', 'SecurityHeadersMiddleware', 'AuditLogMiddleware', 'CORSMiddleware']`.
-  `app.observability.core.config.get_settings() is app.config.settings`
-  returns `True`, confirming the config shim actually shares one instance
-  rather than silently parsing the environment twice.
-- **Not verified**: an actual live request against any observability
-  endpoint (needs `MOCK_MODE=true` + a real or mock SQL Warehouse +
-  Databricks SDK auth), Lakemeter's own Lakebase connection (needs a real
-  Postgres/Lakebase instance), and the frontend build — **no Node.js/npm
-  was available in this environment**, so `frontend/src/pages/Observability.tsx`
-  and `frontend/src/api/observability.ts` were written carefully against
-  the existing code's conventions and reviewed by hand, but not compiled
-  with `tsc`/Vite. Run `cd frontend && npm install && npm run build` before
-  trusting them.
+Everything below was actually run, not just written and assumed correct.
+
+- **Full test suite passes**: `python -m pytest` — 26/26 passed, including
+  live `TestClient` requests through the whole middleware stack.
+- **Merged app imports and serves cleanly**: installed dependencies into a
+  scratch virtualenv, imported `app.main` for real. `app.openapi()`
+  reports **136 total routes**, **48** under `/api/v1/observability/*`,
+  zero collisions with Lakemeter's own routes.
+- **Middleware stack verified live**: `app.user_middleware` reports
+  `['HTTPSRedirectMiddleware', 'SecurityHeadersMiddleware', 'AuditLogMiddleware', 'ObservabilityAllowlistMiddleware', 'CORSMiddleware']`.
+- **Config sharing verified live**:
+  `app.observability.core.config.get_settings() is app.config.settings` → `True`.
+- **Allowlist scoping verified with real requests, not just code review**:
+  `GET /health` (Lakemeter) → 200 with no identity header;
+  `GET /api/v1/observability/health/` → 200 public;
+  `GET /api/v1/observability/cost/summary` with no identity → 403;
+  same request with `X-Forwarded-User` set → passes the gate and reaches
+  real service code (which then attempted an actual Databricks SQL
+  Warehouse call and failed for environmental reasons — no `MOCK_MODE`
+  configured in the test — not a wiring bug).
+- **A real bug found and fixed**: 12 lazy/function-local imports across
+  the observability module were missed by the original import-rewrite pass
+  (it only matched imports at column 0) and still pointed at pre-merge
+  module paths. Found by tracing a route through to its real implementation
+  while working the alert-deduplication task, fixed, and re-verified with
+  `TestClient` requests that no longer raise `ModuleNotFoundError`.
+- **CI workflow YAML-validated** with `pyyaml`; not run through actual
+  GitHub Actions (no such environment available here).
+
+**Not verified**: an actual request against a real Databricks workspace or
+Lakebase instance (needs real infrastructure), and the frontend build — **no
+Node.js/npm was available in this environment**, so
+`frontend/src/pages/Observability.tsx` and `frontend/src/api/observability.ts`
+were written carefully by hand against existing conventions but not
+compiled with `tsc`/Vite. Run `cd frontend && npm install && npm run build`
+before trusting them — treat the frontend changes as meaningfully
+higher-risk than everything else in this scaffold.

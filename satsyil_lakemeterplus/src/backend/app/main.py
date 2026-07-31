@@ -23,6 +23,7 @@ from app.observability.core.security import (
     SecurityHeadersMiddleware,
     AuditLogMiddleware,
 )
+from app.observability.core.allowlist import ObservabilityAllowlistMiddleware
 
 # Initialize logging based on environment
 setup_logging()
@@ -51,15 +52,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Access control for the observability module only: ALLOWED_USERS is
+# enforced on /api/v1/observability/* paths. Applying cost-observability's
+# original AllowlistMiddleware app-wide would change authz semantics for
+# Lakemeter's own estimation routes too — that's a product decision left
+# to whoever owns this project (see docs/TODO.md task #8), so this is
+# deliberately scoped rather than app-wide.
+app.add_middleware(ObservabilityAllowlistMiddleware)
+
 # Security hardening middleware, ported from databricks-cost-observability
 # (see docs/merge-tasks.md task #22). Applied app-wide since these are
 # purely additive (headers, rate limiting, HTTPS enforcement) and don't
-# change authorization semantics — unlike cost-observability's original
-# AllowlistMiddleware, which IS an authz gate and was deliberately left
-# out here pending a product decision on whether it should apply to
-# Lakemeter's estimation routes too (see docs/TODO.md).
+# change authorization semantics.
 # Middleware added later runs outermost, so this order makes
-# HTTPSRedirect -> SecurityHeaders -> AuditLog -> CORS -> routes.
+# HTTPSRedirect -> SecurityHeaders -> AuditLog -> ObservabilityAllowlist -> CORS -> routes.
 app.add_middleware(AuditLogMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(HTTPSRedirectMiddleware)

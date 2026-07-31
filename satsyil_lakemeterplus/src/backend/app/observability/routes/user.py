@@ -50,7 +50,7 @@ def get_user_config(request: Request):
 
     # Try Delta table first
     try:
-        from services.user_permissions_service import get_service
+        from app.observability.services.user_permissions_service import get_service
         svc = get_service()
         if svc is not None:
             cfg = svc.get_for_user(user)

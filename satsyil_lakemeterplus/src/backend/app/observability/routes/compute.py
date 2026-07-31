@@ -19,7 +19,7 @@ _compute_svc_lock = threading.Lock()
 
 def _account_client_dep() -> Optional[AccountClient]:
     try:
-        from core.dependencies import get_account_client
+        from app.observability.core.dependencies import get_account_client
         return get_account_client()
     except Exception:
         return None

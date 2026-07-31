@@ -78,7 +78,7 @@ class UserConfigPayload(BaseModel):
 def list_users(request: Request):
     """List all configured user permissions (admin only)."""
     require_admin(request)
-    from services.user_permissions_service import get_service
+    from app.observability.services.user_permissions_service import get_service
     svc = get_service()
     if svc is None:
         raise HTTPException(status_code=503, detail="Permissions store unavailable")
@@ -89,7 +89,7 @@ def list_users(request: Request):
 def upsert_user(payload: UserConfigPayload, request: Request):
     """Create or update a user's permission config (admin only)."""
     admin = require_admin(request)
-    from services.user_permissions_service import get_service
+    from app.observability.services.user_permissions_service import get_service
     svc = get_service()
     if svc is None:
         raise HTTPException(status_code=503, detail="Permissions store unavailable")
@@ -116,7 +116,7 @@ def delete_user(email: str, request: Request):
         safe_email = validate_email_address(email)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid email address")
-    from services.user_permissions_service import get_service
+    from app.observability.services.user_permissions_service import get_service
     svc = get_service()
     if svc is None:
         raise HTTPException(status_code=503, detail="Permissions store unavailable")

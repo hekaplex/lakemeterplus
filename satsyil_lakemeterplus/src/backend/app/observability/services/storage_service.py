@@ -105,7 +105,7 @@ class StorageService:
             return rows
         # Fallback: AccountClient.workspaces.list()
         try:
-            from core.dependencies import get_account_client
+            from app.observability.core.dependencies import get_account_client
             acct = get_account_client()
             out = []
             for ws in acct.workspaces.list():

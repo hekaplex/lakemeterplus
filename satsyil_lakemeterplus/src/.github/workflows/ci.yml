@@ -1,0 +1,77 @@
+name: CI
+
+# Adapted from lakemeter-oss's own ci.yml (see
+# ../../docs/merge-tasks.md task #19). Covers the merged app: Lakemeter's
+# backend/frontend plus the ported observability module under
+# backend/app/observability/. Does not (yet) restore lakemeter-oss's own
+# large tests/ directory or databricks-cost-observability's
+# tests/smoke_test.py — neither was ported into src/tests/; see
+# ../../docs/TODO.md task #18. src/tests/ instead covers the merge wiring
+# itself (route collisions, middleware order, config sharing, the
+# observability allowlist, and the de-duplicated alert logic).
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - ".github/workflows/ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: src
+
+jobs:
+  python-checks:
+    name: Python checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q backend/app tests
+
+      - name: Run tests
+        run: python -m pytest -v
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: src/frontend
+        run: npm ci
+
+      - name: Type-check and build frontend
+        working-directory: src/frontend
+        run: npm run build

@@ -3,9 +3,11 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
+from sqlalchemy.orm import Session
 
+from app.database import get_db
 from app.observability.core.dependencies import require_admin
 from app.observability.core.validators import (
     validate_email_address,
@@ -75,24 +77,23 @@ class UserConfigPayload(BaseModel):
 
 
 @router.get("/users")
-def list_users(request: Request):
+def list_users(request: Request, admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """List all configured user permissions (admin only)."""
-    require_admin(request)
     from app.observability.services.user_permissions_service import get_service
-    svc = get_service()
-    if svc is None:
-        raise HTTPException(status_code=503, detail="Permissions store unavailable")
+    svc = get_service(db)
     return svc.get_all()
 
 
 @router.put("/users")
-def upsert_user(payload: UserConfigPayload, request: Request):
+def upsert_user(
+    payload: UserConfigPayload,
+    request: Request,
+    admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """Create or update a user's permission config (admin only)."""
-    admin = require_admin(request)
     from app.observability.services.user_permissions_service import get_service
-    svc = get_service()
-    if svc is None:
-        raise HTTPException(status_code=503, detail="Permissions store unavailable")
+    svc = get_service(db)
     config = {
         "tabs":       payload.tabs,
         "workspaces": payload.workspaces,
@@ -109,17 +110,19 @@ def upsert_user(payload: UserConfigPayload, request: Request):
 
 
 @router.delete("/users/{email:path}")
-def delete_user(email: str, request: Request):
+def delete_user(
+    email: str,
+    request: Request,
+    admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """Remove a user's permission config (admin only)."""
-    admin = require_admin(request)
     try:
         safe_email = validate_email_address(email)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid email address")
     from app.observability.services.user_permissions_service import get_service
-    svc = get_service()
-    if svc is None:
-        raise HTTPException(status_code=503, detail="Permissions store unavailable")
+    svc = get_service(db)
     try:
         svc.delete(safe_email)
     except Exception as exc:

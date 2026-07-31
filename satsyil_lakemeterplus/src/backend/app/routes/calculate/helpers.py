@@ -1,69 +1,11 @@
 """Shared helper functions for calculation endpoints."""
 
-
-def get_sku_type(
-    workload_type: str,
-    serverless_enabled: bool = False,
-    photon_enabled: bool = False,
-    dlt_edition: str = None,
-    dbsql_warehouse_type: str = None,
-    fmapi_provider: str = None,
-) -> str:
-    """Determine the SKU product type based on workload configuration."""
-    workload_upper = workload_type.upper()
-
-    if workload_upper == "JOBS":
-        if serverless_enabled:
-            return "JOBS_SERVERLESS_COMPUTE"
-        elif photon_enabled:
-            return "JOBS_COMPUTE_(PHOTON)"
-        else:
-            return "JOBS_COMPUTE"
-
-    elif workload_upper == "ALL_PURPOSE":
-        if serverless_enabled:
-            return "INTERACTIVE_SERVERLESS_COMPUTE"
-        elif photon_enabled:
-            return "ALL_PURPOSE_COMPUTE_(PHOTON)"
-        else:
-            return "ALL_PURPOSE_COMPUTE"
-
-    elif workload_upper == "DLT":
-        if serverless_enabled:
-            return "DELTA_LIVE_TABLES_SERVERLESS"
-        else:
-            edition = (dlt_edition or "CORE").upper()
-            base = f"DLT_{edition}_COMPUTE"
-            return f"{base}_(PHOTON)" if photon_enabled else base
-
-    elif workload_upper == "DBSQL":
-        warehouse_type_upper = (dbsql_warehouse_type or "CLASSIC").upper()
-        if warehouse_type_upper == "SERVERLESS":
-            return "SERVERLESS_SQL_COMPUTE"
-        elif warehouse_type_upper == "PRO":
-            return "SQL_PRO_COMPUTE"
-        else:
-            return "SQL_COMPUTE"
-
-    elif workload_upper == "VECTOR_SEARCH":
-        return "VECTOR_SEARCH_ENDPOINT"
-
-    elif workload_upper == "MODEL_SERVING":
-        return "SERVERLESS_REAL_TIME_INFERENCE"
-
-    elif workload_upper == "FMAPI_DATABRICKS":
-        return "SERVERLESS_REAL_TIME_INFERENCE"
-
-    elif workload_upper == "FMAPI_PROPRIETARY":
-        if fmapi_provider:
-            return f"{fmapi_provider.upper()}_MODEL_SERVING"
-        return "MODEL_SERVING"
-
-    elif workload_upper == "LAKEBASE":
-        return "DATABASE_SERVERLESS_COMPUTE"
-
-    else:
-        return "JOBS_COMPUTE"
+# Note: this module used to also define a get_sku_type() here — a third,
+# unused-by-any-caller reimplementation of the same workload-config -> SKU
+# mapping as app.services.lakebase_queries.get_product_type_for_pricing()
+# (the one every calculate/* route actually calls). Confirmed unused
+# anywhere in the app or its tests and removed; see
+# docs/merge-tasks.md task #17.
 
 
 def build_sku_breakdown_classic(

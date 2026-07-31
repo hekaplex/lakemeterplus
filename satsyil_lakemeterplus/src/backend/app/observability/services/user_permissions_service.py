@@ -1,145 +1,101 @@
-"""Delta-backed per-user tab/workspace/tag permission store.
+"""Lakebase-backed per-user tab/workspace/tag permission store.
 
-Permissions are stored in `<catalog>.default.app_user_permissions` as a single
-JSON config column so the schema never needs migration when new filter types
-are added.
+Migrated from Delta-table storage (a MERGE-based Databricks SQL Statement
+Execution API pattern, reading/writing `<catalog>.default.app_user_permissions`)
+onto a SQLAlchemy model against Lakebase — the same Postgres database the
+rest of the app uses — per docs/merge-tasks.md task #16. See
+app/observability/models.py for the table definition and
+scripts/notebooks/02_create_database.py for where it's actually created at
+install time.
+
+Public method signatures (get_all/get_for_user/upsert/delete) are
+unchanged from the Delta-backed version, so callers only needed to start
+passing a `Session` in — see routes/user.py and routes/admin.py.
 """
 
 import json
 import logging
-import re
-import threading
+from datetime import datetime
 from typing import Optional
 
-from databricks.sdk import WorkspaceClient
+from sqlalchemy.orm import Session
 
-from app.observability.core import sql_executor
+from app.observability.models import ObservabilityUserPermission
 
 _log = logging.getLogger("user_permissions")
 
 
-def _esc_id(s: str) -> str:
-    """Sanitize a short identifier (email, username) for SQL string literals."""
-    return re.sub(r"[\x00-\x1f\x7f]", "", str(s))[:512].replace("'", "''")
-
-
-def _esc_json(s: str) -> str:
-    """Escape a JSON string for use inside a SQL single-quoted string literal."""
-    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", str(s)).replace("'", "''")
-
-
 class UserPermissionsService:
-    def __init__(self, client: WorkspaceClient, catalog: str, warehouse_id: str):
-        self._client = client
-        self._warehouse_id = warehouse_id
-        self._table = f"`{catalog}`.`default`.`app_user_permissions`"
-
-    def _ensure_table(self) -> None:
-        sql_executor.execute_sync(
-            self._client,
-            self._warehouse_id,
-            f"""CREATE TABLE IF NOT EXISTS {self._table} (
-                email      STRING NOT NULL,
-                config     STRING NOT NULL,
-                updated_at TIMESTAMP,
-                updated_by STRING
-            ) USING DELTA""",
-            label="ensure_user_perms_table",
-        )
+    def __init__(self, db: Session):
+        self._db = db
 
     def get_all(self) -> list[dict]:
-        rows = sql_executor.safe_execute_sync(
-            self._client,
-            self._warehouse_id,
-            f"SELECT email, config, CAST(updated_at AS STRING) AS updated_at, updated_by "
-            f"FROM {self._table} ORDER BY email",
-            label="list_user_configs",
+        rows = (
+            self._db.query(ObservabilityUserPermission)
+            .order_by(ObservabilityUserPermission.email)
+            .all()
         )
         result = []
         for r in rows:
             try:
-                cfg = json.loads(r.get("config") or "{}")
-            except Exception:
+                cfg = json.loads(r.config or "{}")
+            except (ValueError, TypeError):
                 cfg = {}
             result.append({
-                "email": r.get("email"),
+                "email": r.email,
                 "config": cfg,
-                "updated_at": r.get("updated_at"),
-                "updated_by": r.get("updated_by"),
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                "updated_by": r.updated_by,
             })
         return result
 
     def get_for_user(self, email: str) -> Optional[dict]:
-        rows = sql_executor.safe_execute_sync(
-            self._client,
-            self._warehouse_id,
-            f"SELECT config FROM {self._table} "
-            f"WHERE lower(email) = lower('{_esc_id(email)}')",
-            label="get_user_config",
-        )
-        if not rows:
+        row = self._get_row(email)
+        if row is None:
             return None
         try:
-            return json.loads(rows[0].get("config") or "{}")
-        except Exception:
+            return json.loads(row.config or "{}")
+        except (ValueError, TypeError):
             return None
 
     def upsert(self, email: str, config: dict, updated_by: str) -> None:
-        self._ensure_table()  # idempotent — creates table if it didn't exist at startup
-        config_sql = _esc_json(json.dumps(config, ensure_ascii=False))
-        sql_executor.execute_sync(
-            self._client,
-            self._warehouse_id,
-            f"""MERGE INTO {self._table} AS t
-                USING (SELECT lower('{_esc_id(email)}') AS email) AS s
-                ON t.email = s.email
-                WHEN MATCHED THEN UPDATE SET
-                    config     = '{config_sql}',
-                    updated_at = current_timestamp(),
-                    updated_by = '{_esc_id(updated_by)}'
-                WHEN NOT MATCHED THEN INSERT (email, config, updated_at, updated_by)
-                VALUES (
-                    lower('{_esc_id(email)}'),
-                    '{config_sql}',
-                    current_timestamp(),
-                    '{_esc_id(updated_by)}'
-                )""",
-            label="upsert_user_config",
-        )
+        email_norm = email.strip().lower()
+        config_json = json.dumps(config, ensure_ascii=False)
+        now = datetime.utcnow()
+
+        row = self._get_row(email_norm)
+        if row is not None:
+            row.config = config_json
+            row.updated_at = now
+            row.updated_by = updated_by
+        else:
+            self._db.add(ObservabilityUserPermission(
+                email=email_norm, config=config_json,
+                updated_at=now, updated_by=updated_by,
+            ))
+        self._db.commit()
 
     def delete(self, email: str) -> None:
-        self._ensure_table()
-        sql_executor.execute_sync(
-            self._client,
-            self._warehouse_id,
-            f"DELETE FROM {self._table} WHERE lower(email) = lower('{_esc_id(email)}')",
-            label="delete_user_config",
+        email_norm = email.strip().lower()
+        self._db.query(ObservabilityUserPermission).filter(
+            ObservabilityUserPermission.email == email_norm
+        ).delete()
+        self._db.commit()
+
+    def _get_row(self, email: str) -> Optional[ObservabilityUserPermission]:
+        return (
+            self._db.query(ObservabilityUserPermission)
+            .filter(ObservabilityUserPermission.email == email.strip().lower())
+            .first()
         )
 
 
-# ── Module-level singleton ─────────────────────────────────────────────────────
+def get_service(db: Session) -> UserPermissionsService:
+    """Construct a UserPermissionsService bound to the given DB session.
 
-_singleton: Optional[UserPermissionsService] = None
-_singleton_lock = threading.Lock()
-
-
-def get_service() -> Optional[UserPermissionsService]:
-    """Return the shared UserPermissionsService instance, creating it on first call."""
-    global _singleton
-    if _singleton is not None:
-        return _singleton
-    with _singleton_lock:
-        if _singleton is None:
-            try:
-                from app.observability.core.dependencies import get_workspace_client
-                from app.observability.core.config import get_settings
-                settings = get_settings()
-                _singleton = UserPermissionsService(
-                    get_workspace_client(),
-                    settings.uc_catalog_name,
-                    settings.databricks_warehouse_id,
-                )
-            except Exception as exc:
-                _log.error("UserPermissionsService init failed: %s", exc)
-                return None
-    return _singleton
+    Unlike the old Delta-backed version, this is no longer a lazily-created
+    module-level singleton — SQLAlchemy Sessions are request-scoped (see
+    app.database.get_db), so callers obtain one per request via FastAPI's
+    `Depends(get_db)` and pass it straight through.
+    """
+    return UserPermissionsService(db)

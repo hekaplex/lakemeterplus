@@ -1,6 +1,9 @@
 """User config endpoint — returns per-user tab/workspace/tag restrictions."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy.orm import Session
+
+from app.database import get_db
 from app.observability.core.config import get_settings
 from app.observability.core.dependencies import resolve_user_identity
 
@@ -32,12 +35,12 @@ def _format_config(cfg: dict, *, is_admin: bool) -> dict:
 
 
 @router.get("/config")
-def get_user_config(request: Request):
+def get_user_config(request: Request, db: Session = Depends(get_db)):
     """Returns the current user's tab/workspace/tag restrictions and admin flag.
 
     Resolution order:
     1. Admin users → full access + is_admin: true
-    2. Delta table (app_user_permissions) → per-user config
+    2. Lakebase (observability_user_permissions) → per-user config
     3. USER_CONFIGS env var → legacy fallback
     4. No config found → full access, is_admin: false
     """
@@ -48,14 +51,13 @@ def get_user_config(request: Request):
     if user and user in settings.admin_users_set:
         return {**_FULL_ACCESS, "is_admin": True}
 
-    # Try Delta table first
+    # Try Lakebase first
     try:
         from app.observability.services.user_permissions_service import get_service
-        svc = get_service()
-        if svc is not None:
-            cfg = svc.get_for_user(user)
-            if cfg is not None:
-                return _format_config(cfg, is_admin=False)
+        svc = get_service(db)
+        cfg = svc.get_for_user(user)
+        if cfg is not None:
+            return _format_config(cfg, is_admin=False)
     except Exception:
         pass
 

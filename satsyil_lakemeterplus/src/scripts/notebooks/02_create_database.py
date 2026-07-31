@@ -287,6 +287,20 @@ table_stmts = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
 
+    # Cost-observability module: per-user tab/workspace/tag access
+    # restrictions. Migrated from Delta-table storage onto Lakebase — see
+    # docs/merge-tasks.md task #16 and
+    # backend/app/observability/models.py. Keyed by raw email (no FK to
+    # {SCHEMA}.users) since the observability module's identity resolution
+    # is independent of Lakemeter's own User table — see
+    # docs-site/docs/observability-guide/merge-notes.md.
+    f"""CREATE TABLE IF NOT EXISTS {SCHEMA}.observability_user_permissions (
+        email VARCHAR(255) PRIMARY KEY,
+        config TEXT NOT NULL,
+        updated_at TIMESTAMP,
+        updated_by VARCHAR(255)
+    )""",
+
     f"CREATE INDEX IF NOT EXISTS idx_line_items_estimate ON {SCHEMA}.line_items(estimate_id)",
     f"CREATE INDEX IF NOT EXISTS idx_line_items_workload_type ON {SCHEMA}.line_items(workload_type)",
 ]

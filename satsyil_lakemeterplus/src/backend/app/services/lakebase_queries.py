@@ -128,47 +128,10 @@ def call_calculate_line_item_costs(db: Session, params: Dict[str, Any]):
         logger.error(f"calculate_line_item_costs failed: {e}")
         raise
 
-
-def get_sku_type(
-    workload_type: str, serverless_enabled: bool = False,
-    photon_enabled: bool = False, dlt_edition: str = None,
-    dbsql_warehouse_type: str = None, fmapi_provider: str = None,
-) -> str:
-    """Determine the SKU product type based on workload configuration."""
-    wt = workload_type.upper()
-
-    if wt == "JOBS":
-        if serverless_enabled:
-            return "JOBS_SERVERLESS_COMPUTE"
-        return "JOBS_COMPUTE_(PHOTON)" if photon_enabled else "JOBS_COMPUTE"
-
-    if wt == "ALL_PURPOSE":
-        if serverless_enabled:
-            return "INTERACTIVE_SERVERLESS_COMPUTE"
-        return "ALL_PURPOSE_COMPUTE_(PHOTON)" if photon_enabled else "ALL_PURPOSE_COMPUTE"
-
-    if wt == "DLT":
-        if serverless_enabled:
-            return "DELTA_LIVE_TABLES_SERVERLESS"
-        edition = (dlt_edition or "CORE").upper()
-        base = f"DLT_{edition}_COMPUTE"
-        return f"{base}_(PHOTON)" if photon_enabled else base
-
-    if wt == "DBSQL":
-        wh = (dbsql_warehouse_type or "CLASSIC").upper()
-        if wh == "SERVERLESS":
-            return "SERVERLESS_SQL_COMPUTE"
-        return "SQL_PRO_COMPUTE" if wh == "PRO" else "SQL_COMPUTE"
-
-    if wt == "VECTOR_SEARCH":
-        return "VECTOR_SEARCH_ENDPOINT"
-    if wt == "MODEL_SERVING":
-        return "SERVERLESS_REAL_TIME_INFERENCE"
-    if wt == "FMAPI_DATABRICKS":
-        return "SERVERLESS_REAL_TIME_INFERENCE"
-    if wt == "FMAPI_PROPRIETARY":
-        return f"{fmapi_provider.upper()}_MODEL_SERVING" if fmapi_provider else "MODEL_SERVING"
-    if wt == "LAKEBASE":
-        return "DATABASE_SERVERLESS_COMPUTE"
-
-    return "JOBS_COMPUTE"
+# Note: this module used to also define a get_sku_type() here that
+# reimplemented the same workload-config -> SKU/product-type mapping as
+# get_product_type_for_pricing() above (and as a third, separately unused
+# copy in app/routes/calculate/helpers.py) — a real duplication risk since
+# get_product_type_for_pricing() is the one Postgres and every calculate/*
+# route actually call. Confirmed unused anywhere in the app or its tests
+# and removed; see docs/merge-tasks.md task #17.

@@ -1,0 +1,124 @@
+# GitLab CI equivalent of .github/workflows/ci.yml + deploy.yml.
+#
+# Kept side-by-side with the GitHub Actions workflows rather than
+# replacing them (this project's canonical CI/CD platform hasn't been
+# decided — see docs/TODO.md). Functionally equivalent: same three jobs
+# (python-checks, frontend-build, deploy), same trigger conditions, same
+# fix for cost-observability's original dev/prod bundle-path bug (see the
+# comment on the `deploy` job below).
+#
+# This file assumes the GitLab project root is satsyil_lakemeterplus/src
+# (mirroring where .github/workflows/ was placed relative to the rest of
+# this scaffold). If this repo's actual root is elsewhere, either move this
+# file there and drop the `src/` prefixes below, or set "CI/CD ->
+# Pipelines -> CI/CD configuration path" in GitLab project settings to
+# point at this file's real location.
+#
+# Required GitLab CI/CD variables (Settings -> CI/CD -> Variables, marked
+# Protected + Masked), equivalent to the GitHub Actions `secrets.*` used
+# in the original workflows:
+#   DATABRICKS_HOST            workspace URL
+#   DATABRICKS_TOKEN           PAT or OAuth token with bundle-deploy rights
+#   DATABRICKS_WAREHOUSE_ID    observability module's SQL Warehouse ID
+#   ADMIN_USERS                comma-separated emails for the observability
+#                               module's Admin panel
+#
+# GitHub's `workflow_dispatch` typed inputs (target/instance_name/app_name)
+# don't have a byte-for-byte GitLab equivalent on all GitLab versions —
+# this uses `variables:` with defaults, which anyone triggering a manual
+# pipeline (CI/CD -> Pipelines -> Run pipeline) can override via the
+# "Variables" section of that form. On GitLab 17.0+ you can instead use
+# `spec:inputs:` for a dropdown-style UI closer to GitHub's; not used here
+# for compatibility with older GitLab versions.
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+# ── python-checks (from ci.yml's "Python checks" job) ──────────────────────
+python-checks:
+  stage: test
+  image: "python:${PYTHON_VERSION}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - src/**/*
+        - .gitlab-ci.yml
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - src/**/*
+        - .gitlab-ci.yml
+  cache:
+    key:
+      files:
+        - src/requirements.txt
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  before_script:
+    - cd src
+  script:
+    - python -m pip install --upgrade pip
+    - python -m pip install -r requirements.txt pytest
+    - python -m compileall -q backend/app tests
+    - python -m pytest -v
+
+# ── frontend-build (from ci.yml's "Frontend build" job) ────────────────────
+frontend-build:
+  stage: build
+  image: "node:${NODE_VERSION}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - src/**/*
+        - .gitlab-ci.yml
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - src/**/*
+        - .gitlab-ci.yml
+  cache:
+    key:
+      files:
+        - src/frontend/package-lock.json
+    paths:
+      - src/frontend/node_modules/
+  before_script:
+    - cd src/frontend
+  script:
+    - npm ci
+    - npm run build
+
+# ── deploy (from deploy.yml's "deploy" job) ─────────────────────────────────
+# Manually triggered only (equivalent to workflow_dispatch), same as the
+# GitHub version. Structurally avoids cost-observability's known dev/prod
+# bundle-path bug (a hardcoded "/dev/" path used regardless of the selected
+# target) the same way the GitHub version does: it never constructs a
+# target-specific path itself. `databricks bundle deploy --target "$TARGET"`
+# and `databricks bundle run lakemeter_installer --target "$TARGET"` both
+# resolve target-specific paths internally, consistently, for whichever
+# target is actually passed.
+deploy:
+  stage: deploy
+  image: "python:${PYTHON_VERSION}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+  variables:
+    TARGET: "dev"          # override at manual-run time: dev or prod
+    INSTANCE_NAME: "lakemeter-customer"
+    APP_NAME: "lakemeter"
+  before_script:
+    - curl -fsSL https://raw.githubusercontent.com/databricks/cli/main/install.sh | sh
+    - cd src/scripts
+  script:
+    - echo "Deploying bundle to target $TARGET"
+    - databricks bundle deploy --target "$TARGET"
+    - PARAMS="instance_name=$INSTANCE_NAME,app_name=$APP_NAME,warehouse_id=$DATABRICKS_WAREHOUSE_ID,admin_users=$ADMIN_USERS"
+    - echo "Running lakemeter_installer job on target $TARGET"
+    - databricks bundle run lakemeter_installer --target "$TARGET" --params "$PARAMS"

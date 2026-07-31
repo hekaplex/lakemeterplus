@@ -10,7 +10,7 @@ from app.services.validators import (
     validate_pricing_tier, validate_payment_option, validate_pricing_payment_combination,
     validate_sku_specific_discounts,
 )
-from app.routes.calculate.helpers import get_sku_type, build_sku_breakdown_classic, build_sku_breakdown_serverless
+from app.routes.calculate.helpers import build_sku_breakdown_classic, build_sku_breakdown_serverless
 from app.routes.calculate.discount import (
     apply_discount_to_sku_breakdown, calculate_total_discount_summary, enhance_total_cost_with_discount,
 )

@@ -1,6 +1,35 @@
 bundle:
   name: lakemeter-installer
 
+# Observability-module variables, merged in from
+# databricks-cost-observability's databricks.yml (see
+# ../../docs/merge-tasks.md task #13). NOTE: that source repo's bundle
+# declared the app itself as a DAB `resources.apps:` resource with its own
+# `permissions:` block; that pattern is NOT ported here, because this
+# bundle's app is created and configured *imperatively* by
+# notebooks/05a_create_app.py via the Databricks SDK, not declaratively by
+# the bundle. Declaring both a `resources.apps:` block AND creating the
+# same app via SDK calls in a notebook would fight over ownership of the
+# same app resource — so the merge is instead: these variables get threaded
+# through as job parameters into notebooks/05a_create_app.py, which now
+# also writes the observability module's env vars into the generated
+# app.yaml (MOCK_MODE, DATABRICKS_WAREHOUSE_ID, UC_CATALOG_NAME,
+# ALLOWED_USERS, ADMIN_USERS). App-level workspace ACLs (CAN_USE/CAN_MANAGE)
+# are not set up by either installer path today — see docs/TODO.md.
+variables:
+  warehouse_id:
+    description: "SQL Warehouse ID the observability module runs billing queries against. Leave blank with mock_mode=true for a demo install."
+    default: ""
+  catalog_name:
+    description: "Unity Catalog name the observability module reads/writes (app_user_permissions, cloud_platform_costs tables)"
+    default: "workspace"
+  mock_mode:
+    description: "Observability module: use mock_system_* Delta tables instead of real system.* tables (true = demo/dev, false = production, requires warehouse_id and system table enablement)"
+    default: "true"
+  admin_users:
+    description: "Comma-separated emails allowed to access the observability module's Admin panel"
+    default: ""
+
 sync:
   include:
     - "notebooks/**"
@@ -26,6 +55,15 @@ resources:
           default: "lakemeter-secrets"
         - name: claude_endpoint
           default: "databricks-claude-opus-4-6"
+        # ── Observability module (see docs/merge-tasks.md task #13) ──────
+        - name: warehouse_id
+          default: "${var.warehouse_id}"
+        - name: catalog_name
+          default: "${var.catalog_name}"
+        - name: mock_mode
+          default: "${var.mock_mode}"
+        - name: admin_users
+          default: "${var.admin_users}"
 
       # Task dependency graph (parallel where possible):
       #
@@ -101,6 +139,10 @@ resources:
               app_name: "{{job.parameters.app_name}}"
               secrets_scope: "{{job.parameters.secrets_scope}}"
               claude_endpoint: "{{job.parameters.claude_endpoint}}"
+              warehouse_id: "{{job.parameters.warehouse_id}}"
+              catalog_name: "{{job.parameters.catalog_name}}"
+              mock_mode: "{{job.parameters.mock_mode}}"
+              admin_users: "{{job.parameters.admin_users}}"
           environment_key: serverless_env
 
         # ── Merge point: grant SP access (needs app + database) ─────────
@@ -142,3 +184,23 @@ resources:
         - environment_key: serverless_env
           spec:
             environment_version: "5"
+
+# Dev/prod targets for the observability module's mock_mode, mirroring
+# databricks-cost-observability's own dev/prod split (see task #13). This
+# only affects the `mock_mode` variable threaded into the generated
+# app.yaml (via notebooks/05a_create_app.py) — it does not change how or
+# where Lakebase/the app itself get provisioned, which is identical
+# between targets (that split doesn't exist in Lakemeter's own installer).
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      mock_mode: "true"
+  prod:
+    mode: production
+    variables:
+      mock_mode: "false"
+      # warehouse_id and admin_users have no safe default for prod — pass
+      # them explicitly: `databricks bundle deploy -t prod --var
+      # warehouse_id=<id> --var admin_users=<emails>`

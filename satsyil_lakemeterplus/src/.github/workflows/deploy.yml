@@ -1,0 +1,73 @@
+name: Deploy to Databricks
+
+# Adapted from databricks-cost-observability's deploy.yml (see
+# ../../docs/merge-tasks.md task #24), restructured for the merged bundle
+# at scripts/databricks.yml, which deploys via the `lakemeter_installer`
+# job (see scripts/notebooks/05a_create_app.py, 06_deploy_app.py) rather
+# than a bare `resources.apps:` bundle resource.
+#
+# This intentionally avoids a bug present in the source workflow: it built
+# an app source-code path by hardcoding the literal string
+# "/.bundle/databricks-cost-observability/dev/files" regardless of which
+# target (dev/prod) was actually selected, so a "prod" deploy would still
+# have sourced code from the dev bundle's files. This workflow never
+# constructs a bundle-relative path itself — `databricks bundle run`
+# resolves that internally for whichever target is passed via `-t`, and
+# the app.yaml + source deployment happens inside the job's own
+# create_app/deploy_app tasks (scripts/notebooks/05a_create_app.py,
+# 06_deploy_app.py), not as a separate manually-pathed CLI step here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Bundle target: dev (mock_mode=true) or prod (real system tables, requires warehouse_id)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+      instance_name:
+        description: "Lakebase instance name"
+        required: true
+        default: "lakemeter-customer"
+      app_name:
+        description: "Databricks App name"
+        required: true
+        default: "lakemeter"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/scripts
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Deploy bundle
+        run: |
+          TARGET="${{ github.event.inputs.target || 'dev' }}"
+          echo "Deploying bundle to target: $TARGET"
+          databricks bundle deploy --target "$TARGET"
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+      - name: Run installer job
+        run: |
+          TARGET="${{ github.event.inputs.target || 'dev' }}"
+          PARAMS="instance_name=${{ github.event.inputs.instance_name }},app_name=${{ github.event.inputs.app_name }},warehouse_id=${{ secrets.DATABRICKS_WAREHOUSE_ID }},admin_users=${{ secrets.ADMIN_USERS }}"
+          echo "Running lakemeter_installer job on target: $TARGET"
+          databricks bundle run lakemeter_installer --target "$TARGET" --params "$PARAMS"
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}

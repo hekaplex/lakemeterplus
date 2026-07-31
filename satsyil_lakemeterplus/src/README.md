@@ -59,17 +59,30 @@ Remaining work is tracked in `../docs/TODO.md`. Licensing: see
   Lakemeter's installer/DAB/deployment files, dependencies and env vars
   unioned with the observability module's. Hardcoded environment-specific
   values found in the source repos were removed in favor of placeholders.
-  `scripts/databricks.yml` (the DAB) is still Lakemeter's original,
-  unmerged with cost-observability's simpler bundle — see TODO.
-- **`tests/`** — a new test suite (26 tests) covering the merge work itself:
-  route wiring, middleware order, config sharing, the observability
-  allowlist's scoping, and (previously completely untested)
-  `AlertService.detect_spikes()`'s spike-detection math. Does **not**
-  include either source repo's own pre-existing test suite. Run with
-  `python -m pytest` from `src/` (uses `pyproject.toml`'s
+  `scripts/databricks.yml` (the DAB) now has a `variables:` block
+  (`warehouse_id`, `catalog_name`, `mock_mode`, `admin_users`) and
+  `dev`/`prod` targets, threaded through into
+  `scripts/notebooks/05a_create_app.py` — the notebook that actually
+  generates the deployed app's `app.yaml` at install time — so it now
+  writes the observability module's env vars in too. The `install.sh`
+  shell/Python entrypoints that invoke this bundle were **not** ported
+  into `src/` at all — only `databricks.yml`/`notebooks/`/`functions/`
+  were copied — see TODO.
+- **`tests/`** — a test suite (**77 tests**) covering the merge work
+  itself: route wiring, middleware order, config sharing, the
+  observability allowlist's scoping, `AlertService.detect_spikes()`'s
+  spike-detection math, the SQL-injection validators, and the `MOCK_MODE`
+  table-rewrite logic — all previously at zero coverage in either source
+  repo. Does **not** include either source repo's own pre-existing test
+  suite. Run with `python -m pytest` from `src/` (uses `pyproject.toml`'s
   `pythonpath = ["backend"]`).
 - **`.github/workflows/ci.yml`** — compiles + runs the Python test suite,
   and builds the frontend, on every push/PR touching `src/`.
+- **`.github/workflows/deploy.yml`** — deploys the bundle and runs the
+  installer job. Structurally avoids a bug present in
+  cost-observability's original `deploy.yml` (a hardcoded `/dev/` bundle
+  path used regardless of the selected deploy target) by never
+  constructing a target-specific path itself.
 
 ## What is deliberately *not* merged (yet)
 
@@ -91,8 +104,8 @@ See `../docs/TODO.md` for the full remaining list.
 
 Everything below was actually run, not just written and assumed correct.
 
-- **Full test suite passes**: `python -m pytest` — 26/26 passed, including
-  live `TestClient` requests through the whole middleware stack.
+- **Full test suite passes**: `python -m pytest` — **77/77 passed**,
+  including live `TestClient` requests through the whole middleware stack.
 - **Merged app imports and serves cleanly**: installed dependencies into a
   scratch virtualenv, imported `app.main` for real. `app.openapi()`
   reports **136 total routes**, **48** under `/api/v1/observability/*`,
@@ -115,8 +128,24 @@ Everything below was actually run, not just written and assumed correct.
   module paths. Found by tracing a route through to its real implementation
   while working the alert-deduplication task, fixed, and re-verified with
   `TestClient` requests that no longer raise `ModuleNotFoundError`.
-- **CI workflow YAML-validated** with `pyyaml`; not run through actual
-  GitHub Actions (no such environment available here).
+- **Generated `app.yaml` verified by rendering the actual template**:
+  extracted `scripts/notebooks/05a_create_app.py`'s `app_yaml_content`
+  f-string, rendered it with realistic sample values in a throwaway
+  script (`dbutils` isn't available outside a real Databricks notebook, so
+  the notebook itself can't run locally), and confirmed the output is
+  valid YAML containing exactly the expected observability env vars
+  (`MOCK_MODE`, `DATABRICKS_WAREHOUSE_ID`, `UC_CATALOG_NAME`,
+  `ADMIN_USERS`, etc.) with the right values in the right places.
+- **`ci.yml` and `deploy.yml` YAML-validated** with `pyyaml`;
+  `deploy.yml`'s shell script bodies additionally checked with `bash -n`
+  after substituting placeholder values for the GitHub Actions
+  `${{ }}` expressions. Neither run through actual GitHub Actions (no such
+  environment available here).
+- **`scripts/databricks.yml` YAML-validated and structurally inspected**:
+  confirmed the new `variables:`, job `parameters:`, the `create_app`
+  task's `base_parameters`, and the `dev`/`prod` `targets:` all resolve to
+  what was intended (e.g. `create_app` receives all 9 expected parameters,
+  `dev`/`prod` targets set `mock_mode` to `"true"`/`"false"` respectively).
 
 **Not verified**: an actual request against a real Databricks workspace or
 Lakebase instance (needs real infrastructure), and the frontend build — **no
@@ -125,4 +154,5 @@ Node.js/npm was available in this environment**, so
 were written carefully by hand against existing conventions but not
 compiled with `tsc`/Vite. Run `cd frontend && npm install && npm run build`
 before trusting them — treat the frontend changes as meaningfully
-higher-risk than everything else in this scaffold.
+higher-risk than everything else in this scaffold, all of which was
+verified by actually executing it.

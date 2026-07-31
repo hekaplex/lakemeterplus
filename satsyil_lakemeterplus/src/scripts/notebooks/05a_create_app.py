@@ -14,18 +14,38 @@ dbutils.widgets.text("db_name", "lakemeter_pricing")
 dbutils.widgets.text("app_name", "lakemeter")
 dbutils.widgets.text("secrets_scope", "lakemeter-secrets")
 dbutils.widgets.text("claude_endpoint", "databricks-claude-opus-4-6")
+# Observability module (see docs/merge-tasks.md task #13) — threaded
+# through from databricks.yml's `warehouse_id`/`catalog_name`/`mock_mode`/
+# `admin_users` bundle variables.
+dbutils.widgets.text("warehouse_id", "")
+dbutils.widgets.text("catalog_name", "workspace")
+dbutils.widgets.text("mock_mode", "true")
+dbutils.widgets.text("admin_users", "")
 
 instance_name = dbutils.widgets.get("instance_name")
 db_name = dbutils.widgets.get("db_name")
 app_name = dbutils.widgets.get("app_name")
 secrets_scope = dbutils.widgets.get("secrets_scope")
 claude_endpoint = dbutils.widgets.get("claude_endpoint")
+warehouse_id = dbutils.widgets.get("warehouse_id")
+catalog_name = dbutils.widgets.get("catalog_name")
+mock_mode = dbutils.widgets.get("mock_mode")
+admin_users = dbutils.widgets.get("admin_users")
 
 print(f"Instance: {instance_name}")
 print(f"Database: {db_name}")
 print(f"App: {app_name}")
 print(f"Secrets scope: {secrets_scope}")
 print(f"Claude endpoint: {claude_endpoint}")
+print(f"Observability warehouse_id: {warehouse_id or '(not set)'}")
+print(f"Observability catalog_name: {catalog_name}")
+print(f"Observability mock_mode: {mock_mode}")
+print(f"Observability admin_users: {admin_users or '(not set)'}")
+
+if mock_mode.strip().lower() != "true" and not warehouse_id.strip():
+    print("WARNING: mock_mode is false but warehouse_id is empty — the "
+          "observability module will not be able to run billing queries "
+          "until DATABRICKS_WAREHOUSE_ID is set in the deployed app.")
 
 # COMMAND ----------
 
@@ -156,6 +176,20 @@ env:
   # AI Assistant (Claude) model serving endpoint
   - name: "CLAUDE_MODEL_ENDPOINT"
     valueFrom: "lm-claude-endpoint"
+
+  # Cost-observability module (see docs/merge-tasks.md task #13)
+  - name: "MOCK_MODE"
+    value: "{mock_mode}"
+  - name: "DATABRICKS_WAREHOUSE_ID"
+    value: "{warehouse_id}"
+  - name: "UC_CATALOG_NAME"
+    value: "{catalog_name}"
+  - name: "ADMIN_USERS"
+    value: "{admin_users}"
+  - name: "ALLOWED_USERS"
+    value: ""
+  - name: "ALLOWED_WORKSPACE_IDS"
+    value: "*"
 """
 
 nb_context = dbutils.notebook.entry_point.getDbutils().notebook().getContext()

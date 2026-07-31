@@ -24,7 +24,7 @@ from databricks.sdk.service.sql import StatementState
 
 HOST = os.environ["DATABRICKS_HOST"]
 TOKEN = os.environ["DATABRICKS_TOKEN"]
-WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID", "21f5bd20b7f44a51")
+WAREHOUSE_ID = os.environ["DATABRICKS_WAREHOUSE_ID"]
 
 client = WorkspaceClient(host=HOST, token=TOKEN)
 

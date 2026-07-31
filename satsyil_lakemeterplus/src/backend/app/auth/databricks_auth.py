@@ -34,18 +34,30 @@ FORWARDED_EMAIL_HEADER = "X-Forwarded-Email"
 FORWARDED_USER_HEADER = "X-Forwarded-User"
 FORWARDED_ACCESS_TOKEN_HEADER = "X-Forwarded-Access-Token"
 
-# Extended header list (check both cases for flexibility)
+# Extended header list (check both cases for flexibility).
+# Includes headers from both this app's original auth module and the ported
+# observability module's app.observability.core.dependencies._USER_HEADERS
+# (x-databricks-user-email, x-auth-request-user, remote-user) — the two
+# sibling apps used different header names for the same Databricks Apps
+# proxy identity. See satsyil_lakemeterplus/docs/merge-tasks.md task #7 for
+# the deeper unification (one shared resolver function) still to do.
 EMAIL_HEADERS = [
     "X-Forwarded-Email",
     "x-forwarded-email",
     "X-Forwarded-Preferred-Username",
     "x-forwarded-preferred-username",
+    "X-Databricks-User-Email",
+    "x-databricks-user-email",
 ]
 USER_HEADERS = [
-    "X-Forwarded-User", 
+    "X-Forwarded-User",
     "x-forwarded-user",
     "X-Forwarded-Name",
     "x-forwarded-name",
+    "X-Auth-Request-User",
+    "x-auth-request-user",
+    "Remote-User",
+    "remote-user",
 ]
 
 # Environment variable for local development

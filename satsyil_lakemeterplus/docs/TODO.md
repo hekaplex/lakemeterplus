@@ -1,46 +1,124 @@
 # TODO — Remaining Merge Work
 
 Status snapshot of `satsyil_lakemeterplus/src` against the plan in
-`merge-tasks.md`. Task numbers below match that file.
+`merge-tasks.md`. Task numbers below match that file, which now carries a
+**Status** column per task — this file is the narrative version.
 
 ## Done this session
 
-| # | Task | What was actually done |
-|---|---|---|
-| 2 | Scaffold unified `src/` | `src/backend` = copy of `lakemeter-oss` backend app source; `src/frontend` = copy of its React SPA source. Build artifacts (`dist/`, `node_modules/`, compiled `static/assets`) intentionally excluded — regenerate via `npm run build`. |
-| 3 | Port observability `core/` | `sql_executor.py`, `validators.py`, `subscriptions.py`, `dependencies.py`, `security.py`, `config.py` copied into `src/backend/app/observability/core/`, imports rewritten to the new package path. |
-| 4 | Port observability `services/` | All 18 service files copied into `src/backend/app/observability/services/`, imports rewritten. |
-| 5 | Port observability `routes/` + mount | All 20 `api/v1/*.py` routers copied into `src/backend/app/observability/routes/`; `router.py` aggregates them under an `/observability` prefix; `main.py` mounts the aggregate at `/api/v1`, yielding `/api/v1/observability/*` with **zero collisions** against Lakemeter's existing routes. |
-| 6 | `WorkspaceClient`/`AccountClient` DI | Came along for free — `observability/core/dependencies.py` was ported verbatim and provides these; not yet cross-wired into Lakemeter's own `auth/token_manager.py` (see task 7, not done). |
-| 9 (partial) | Merge `requirements.txt`/`app.yaml` | Dependency lists unioned (`scikit-learn`, `numpy` added). `app.yaml` env vars unioned; **hardcoded environment-specific values found in both source repos** (a specific workspace URL in Lakemeter's `app.yaml`, a demo warehouse ID `21f5bd20b7f44a51` in cost-observability's `app.yaml`) were **removed and replaced with empty/`valueFrom` placeholders** rather than silently carried into the merged file. Settings classes themselves are still **not** unified — see below. |
+**Backend scaffold + wiring (tasks 2–6):** `src/backend` = copy of
+`lakemeter-oss`'s backend app source; `src/frontend` = copy of its React
+SPA source. `databricks-cost-observability`'s 20 routers, 18 services, and
+`core/` infra were ported into `src/backend/app/observability/`, imports
+rewritten, and mounted in `main.py`. **Verified by actually installing
+dependencies and importing `app.main`** (not just `py_compile`): the merged
+app reports 136 total routes via `app.openapi()`, 48 of them under
+`/api/v1/observability/*`, zero path collisions with Lakemeter's own routes.
 
-**Verification performed:** installed both modules' Python dependencies into a scratch virtualenv and actually imported `app.main` (not just `py_compile`). It imports successfully; `app.openapi()` reports 136 total routes, 48 under `/api/v1/observability/*`, with no path collisions against Lakemeter's own routes. This confirms the router wiring is functionally correct, not merely syntactically valid. Full details in `../src/README.md`.
+**Config unification (task 9, done):** all of the observability module's
+settings fields and property helpers were folded into `app/config.py`'s
+`Settings` class. `app/observability/core/config.py` is now a compatibility
+shim — `get_settings()` returns the *same* `app.config.settings` instance —
+so the ~14 files that import it didn't need individual rewrites. Verified
+at runtime: `app.observability.core.config.get_settings() is app.config.settings`
+→ `True`.
+
+**Auth header unification (task 7, partial):** the two modules used
+different, non-overlapping sets of proxy header names for the same
+Databricks Apps identity (Lakemeter: `X-Forwarded-Email`; observability:
+`x-forwarded-user`, `x-databricks-user-email`, etc.). This was a real bug
+risk post-merge — one module could silently see no identity depending on
+which header Databricks Apps sent. Fixed by extending both header lists to
+their union. **Still separate:** the two modules keep their own resolver
+functions and identity-of-record concept (Lakemeter's DB-backed `User` row
+vs. observability's stateless per-request resolution) — collapsing those
+into one shared resolver is still open.
+
+**Security middleware (task 22, done):** `HTTPSRedirectMiddleware`,
+`SecurityHeadersMiddleware`, and `AuditLogMiddleware` (rate limiting, bot
+detection, IP banning) from the observability module are now wired into
+`main.py` app-wide. Deliberately **not** ported: `AllowlistMiddleware`,
+cost-observability's actual authz gate — applying that app-wide would
+change access control for Lakemeter's own estimation routes too, which is
+a product decision, not a mechanical port (see task 8, still open).
+
+**Hardcoded values removed (task 11, done):** the demo warehouse ID
+`21f5bd20b7f44a51` that appeared as a silent fallback default in three
+scripts (`send_cost_alerts.py`, `setup_mock_tables.py`,
+`setup_enterprise_mock_data.py`) was replaced with a required environment
+variable, matching how `DATABRICKS_HOST`/`DATABRICKS_TOKEN` already behave
+in those same scripts. (Left untouched: the same ID string used as
+self-consistent mock *data* — seeding a fake warehouse row — inside
+`setup_mock_tables.py`; that's demo content, not configuration.)
+
+**`requirements.txt` / `app.yaml` merge (task 9/14, done):** dependency
+lists unioned (`scikit-learn`, `numpy` added). `app.yaml` env vars unioned;
+the two source repos' hardcoded environment-specific values (a workspace
+URL, the demo warehouse ID) were replaced with empty/`valueFrom` placeholders
+rather than carried forward.
+
+**Licensing (task 1, done):** the user explicitly decided the merged code
+should use the more permissive of the two upstream licenses. Elastic
+License 2.0 (databricks-cost-observability's license) was judged more
+permissive than the Databricks License (lakemeter-oss's) because the latter
+restricts use to "in connection with your use of the Databricks Services"
+under a separate commercial agreement — a real limitation Elastic 2.0
+doesn't have (its main restriction is against re-offering the software as a
+competing hosted service). Implemented as `satsyil_lakemeterplus/LICENSE`
+(Elastic License 2.0) plus `satsyil_lakemeterplus/NOTICE.md`, which
+preserves the upstream attribution and notice-preservation terms both
+original licenses require for derivative works (including reproducing
+`lakemeter-oss`'s own NOTICE.md dependency table, since that content still
+applies). **This is a good-faith technical reading of both license texts,
+not legal advice** — if this project is ever distributed beyond
+internal/scaffold use, get it reviewed by whoever has authority over each
+upstream repository.
+
+**Frontend proof of concept (task 12, partial):** one observability page
+shipped — `src/frontend/src/pages/Observability.tsx` (KPI cards from
+`/api/v1/observability/cost/summary`, raw-JSON preview of
+`/api/v1/observability/executive/summary`), a typed API client
+(`src/frontend/src/api/observability.ts`), a `/observability` route in
+`App.tsx`, and a nav entry in `Layout.tsx`. Styled to match Lakemeter's
+existing CSS-variable-based theme system and heroicons usage. **Not
+verified by a build** — no Node.js/npm was available in this environment,
+so this was reviewed by hand for syntax/type correctness rather than
+compiled with `tsc`/Vite. Treat as higher-risk than the backend changes
+until someone runs `npm install && npm run build` on it.
 
 ## Not started / explicitly deferred
 
 | # | Task | Why it's not done | Recommended next step |
 |---|---|---|---|
-| 1 | Resolve Elastic License 2.0 vs. Databricks License conflict | Not an engineering decision — needs sign-off from whoever owns each source repo before the merged code can be distributed | Get an explicit licensing decision before this project goes beyond internal/scaffold use |
-| 7 | Unify auth/identity resolution | Two different header-based identity systems (`X-Forwarded-Email` vs. `X-Forwarded-User`/numeric-ID SCIM resolution) need careful reconciliation to avoid silently breaking either app's access control | Write one `resolve_user_identity()` that checks the union of both header sets; keep Lakemeter's DB-backed `get_or_create_user()` as the identity of record; add a regression test asserting both header shapes still resolve correctly |
-| 8 | Merge admin/allowlist model | Depends on task 7 | After identity is unified, decide whether `ALLOWED_USERS`/`ADMIN_USERS` env-var checks gate only `/observability/*` or the whole app |
-| 9 (remainder) | Unify `Settings`/config classes into one Pydantic settings object | Deferred to keep this pass's blast radius small — the two modules currently read **independent** env-driven settings, which works but means env vars aren't validated/documented in one place | Fold `observability/core/config.py`'s fields into `app/config.py`'s `Settings`, delete the duplicate class, update `observability` imports to use it |
-| 10 | Wire `MOCK_MODE` through the merged `sql_executor` | Depends on 9 (config unification) being at least partially done, or can be done standalone since `MOCK_MODE` today lives entirely in the observability module's own settings | Low effort — the rewrite logic ported as-is and already works standalone; just needs an end-to-end smoke test once a real/mock warehouse is available |
-| 11 | Port mock/demo data scripts, parameterize hardcoded warehouse ID | Scripts were copied (`observability/scripts/setup_mock_tables.py`, `setup_enterprise_mock_data.py`) but **not yet edited** to remove the hardcoded warehouse ID `21f5bd20b7f44a51` that appears inside the scripts themselves (only the `app.yaml` copy was fixed) | Grep both scripts for the literal ID and replace with an env/config read |
-| 12 | Frontend: Observability pages in the React app | Largest remaining piece of work — no React code was written this session, only backend porting | Recommend incremental delivery: start with one page (e.g. Cost Dashboard) calling `/api/v1/observability/cost/summary`, reuse Chart.js as an embedded component rather than rewriting visualizations from scratch, add a nav entry in `frontend/src/components/Layout.tsx` |
-| 13 | Merge `databricks.yml` (DAB) | Not attempted — `scripts/databricks.yml` in `src/` is still Lakemeter's original 9-task job DAG; cost-observability's simpler `apps`-resource bundle was not folded in | Add warehouse/catalog bundle variables and a permissions block for the observability module's SQL Warehouse access; likely a new parallel task in the existing DAG rather than a new bundle |
-| 15 | De-duplicate alert-sending logic | Not started | `services/alert_service.py` and `scripts/send_cost_alerts.py` (standalone, for scheduled-job use) were both ported as-is with the duplication intact; factor out a shared `detect_spikes()`/email-building module both can import |
-| 16 | Migrate `UserPermissionsService` off Delta tables onto Lakebase | Not started (P2 — optional) | Only worth doing if/when task 9 is complete and there's appetite for a schema migration |
+| 8 | Merge admin/allowlist model app-wide | Depends on deciding whether `ALLOWED_USERS`/`ADMIN_USERS` (and cost-observability's `AllowlistMiddleware`) should gate Lakemeter's estimation routes too, or stay scoped to `/observability/*` only — a product decision | Get that decision, then wire `AllowlistMiddleware` (or an equivalent) accordingly |
+| 12 (remainder) | Frontend pages for the other ~16 observability domains | Largest remaining piece of work by volume | Incremental delivery, one domain per page; reuse Chart.js/D3/3d-force-graph as embedded components rather than rewriting visualizations from scratch |
+| 13 | Merge `databricks.yml` (DAB) | Not attempted | Add warehouse/catalog bundle variables + SQL Warehouse permissions as a parallel task in Lakemeter's existing 9-task DAG |
+| 15 | De-duplicate alert-sending logic | Not started | `services/alert_service.py` and `scripts/send_cost_alerts.py` were both ported with their pre-existing duplication intact |
+| 16 | Migrate `UserPermissionsService` off Delta tables onto Lakebase | Not started (P2, optional) | Only worth it if there's appetite for a schema migration |
 | 17 | Reconcile SKU/product-type mapping duplication | Not started | Needs a design decision on whether estimation (cached/synced pricing) and observability (live `system.billing.list_prices`) should share one SKU-naming utility even though they'll keep separate data sources |
-| 18 | Unify testing strategy / add unit tests for ported observability services | Not started — **the ported observability module currently has zero test coverage in `src/`**, same as its source repo | Highest-value follow-up for correctness confidence; start with the `harness`-style ordered smoke test pattern Lakemeter already has |
-| 19 | Extend CI for the new package | Blocked on 18 | |
-| 20 | Cross-link estimate-vs-actual comparison feature | Not started (net-new feature, not just a port) | Worth a dedicated design doc once both modules are independently live |
-| 21 | Replace HTML-DOM-manifest smoke checks with component/E2E tests | Blocked on 12 (no React observability pages exist yet) | |
-| 22 | Adopt cost-observability's hardened security middleware app-wide | Not started (P3) | `observability/core/security.py` was ported and compiles, but is **not wired into `main.py`** — Lakemeter's app currently has no rate limiting/bot detection/IP banning |
+| 18 | Unify testing strategy / add unit tests for ported observability services | Not started — **zero test coverage for anything in `src/`** | Highest-value follow-up for correctness confidence beyond the import-time verification done this session |
+| 19 | Extend/create CI for the merged app | Blocked on 18; no CI workflow exists for `src/` at all yet | |
+| 20 | Cross-link estimate-vs-actual comparison feature | Not started (net-new feature) | Worth a dedicated design doc once both modules are further along |
+| 21 | Replace HTML-DOM-manifest smoke checks with component/E2E tests | Blocked on 12 (only one React observability page exists) | |
 | 23 | Consolidate documentation sites | Not started (P3) | |
-| 24 | Fix latent `deploy.yml` prod/dev bundle-path bug | Not started (P3) — this bug lives in `databricks-cost-observability-main/.github/workflows/deploy.yml`, which was not ported into `src/` at all yet (no CI workflow exists for the merged app) | Write a new `src/.github/workflows/deploy.yml` deriving from Lakemeter's simpler single-target deploy, avoiding cost-observability's dev/prod path bug from the start |
+| 24 | Write a deploy workflow for `src/`, avoiding cost-observability's known dev/prod bundle-path bug | Not started — no CI/deploy workflow exists for `src/` yet | |
 
 ## Known gaps not captured as numbered merge-tasks
 
-- **No CI workflow exists yet for `src/`** — neither `lakemeter-oss`'s `ci.yml` nor `databricks-cost-observability`'s `deploy.yml`/`load-enterprise-data.yml` were copied in. Needs a fresh workflow written for the merged layout (task 24 touches this but doesn't cover the full CI story).
-- **`src/backend/static/`** only contains the `pricing/` CSV bundle and the Databricks icon — the compiled React `assets/` bundle is intentionally not checked in (build artifact); running the app in "combined" (single-process, serves frontend) mode requires `cd src/frontend && npm install && npm run build` and copying `dist/` into `src/backend/static/` first, same as the source repo's own deploy flow.
-- **No end-to-end request was made against either module** — only import-time wiring was verified. Actually exercising an endpoint requires either a real Databricks workspace + Lakebase instance, or building out local mock/dev fixtures for both (Lakemeter has none checked in beyond `DATABASE_URL` override; cost-observability's `MOCK_MODE` covers only the UC side).
+- **No CI/deploy workflow exists yet for `src/`** — neither source repo's
+  workflows were copied in.
+- **`src/backend/static/`** only contains the `pricing/` CSV bundle and the
+  Databricks icon — the compiled React `assets/` bundle isn't checked in
+  (build artifact). Running in "combined" mode (single process serving both
+  frontend and API) requires `cd src/frontend && npm install && npm run
+  build` and copying `dist/` into `src/backend/static/` first.
+- **No end-to-end request was made against either module.** Only import-time
+  wiring (backend) and hand-review (frontend) were verified this session —
+  actually exercising an endpoint needs either a real Databricks workspace +
+  Lakebase instance, or local mock/dev fixtures for both modules (Lakemeter
+  has none beyond a `DATABASE_URL` override; the observability module's
+  `MOCK_MODE` only covers the Unity-Catalog side).
+- **No Node.js was available in this environment**, so the frontend changes
+  (task 12) could not be built or type-checked — they were written carefully
+  against the existing code's conventions and reviewed by hand, but should
+  be treated as unverified until someone runs the frontend build.

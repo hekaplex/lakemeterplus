@@ -36,7 +36,7 @@ from databricks.sdk.service.sql import StatementState
 # ── Config ────────────────────────────────────────────────────────────────────
 HOST         = os.environ["DATABRICKS_HOST"]
 TOKEN        = os.environ["DATABRICKS_TOKEN"]
-WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID", "21f5bd20b7f44a51")
+WAREHOUSE_ID = os.environ["DATABRICKS_WAREHOUSE_ID"]
 SMTP_HOST    = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT    = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER    = os.environ["SMTP_USER"]

@@ -5,6 +5,7 @@ import Calculator from './pages/Calculator'
 import EstimateDetail from './pages/EstimateDetail'
 import TestCalculations from './pages/TestCalculations'
 import Pricing from './pages/Pricing'
+import Observability from './pages/Observability'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Route path="calculator/:id" element={<Calculator />} />
         <Route path="estimate/:id" element={<EstimateDetail />} />
         <Route path="pricing" element={<Pricing />} />
+        <Route path="observability" element={<Observability />} />
         <Route path="test-calculations" element={<TestCalculations />} />
       </Route>
     </Routes>

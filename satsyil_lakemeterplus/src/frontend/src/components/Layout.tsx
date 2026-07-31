@@ -13,6 +13,7 @@ import {
   QuestionMarkCircleIcon,
   DocumentTextIcon,
   CurrencyDollarIcon,
+  ChartBarIcon,
 } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import { useState, useRef, useEffect, useCallback } from 'react'
@@ -47,6 +48,7 @@ const navigation = [
   { name: 'Estimates', href: '/', icon: Squares2X2Icon },
   { name: 'New Estimate', href: '/calculator', icon: PlusCircleIcon },
   { name: 'Pricing', href: '/pricing', icon: CurrencyDollarIcon },
+  { name: 'Observability', href: '/observability', icon: ChartBarIcon },
 ]
 
 // Lakemeter logo - White icon on Databricks Lava background

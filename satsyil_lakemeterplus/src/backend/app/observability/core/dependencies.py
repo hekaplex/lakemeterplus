@@ -8,12 +8,20 @@ import logging
 
 _log = logging.getLogger("security")
 
-# Headers that Databricks Apps may use to forward the authenticated user email
+# Headers that Databricks Apps may use to forward the authenticated user email.
+# Kept in sync with app.auth.databricks_auth's EMAIL_HEADERS/USER_HEADERS
+# (Lakemeter's own auth module) — the two modules were ported from sibling
+# apps that used different header names for the same Databricks Apps proxy
+# identity, so this list is the union of both. See
+# satsyil_lakemeterplus/docs/merge-tasks.md task #7 for the deeper
+# unification (one shared resolver function) still to do.
 _USER_HEADERS = [
     "x-forwarded-user",
     "x-databricks-user-email",
     "x-auth-request-user",
     "remote-user",
+    "x-forwarded-email",
+    "x-forwarded-preferred-username",
 ]
 
 # Matches a proper email: something@domain.tld

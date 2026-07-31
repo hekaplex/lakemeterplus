@@ -18,6 +18,11 @@ from app.routes import (
 )
 from app.routes.chat import router as chat_router
 from app.observability.router import api_router as observability_router
+from app.observability.core.security import (
+    HTTPSRedirectMiddleware,
+    SecurityHeadersMiddleware,
+    AuditLogMiddleware,
+)
 
 # Initialize logging based on environment
 setup_logging()
@@ -45,6 +50,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security hardening middleware, ported from databricks-cost-observability
+# (see docs/merge-tasks.md task #22). Applied app-wide since these are
+# purely additive (headers, rate limiting, HTTPS enforcement) and don't
+# change authorization semantics — unlike cost-observability's original
+# AllowlistMiddleware, which IS an authz gate and was deliberately left
+# out here pending a product decision on whether it should apply to
+# Lakemeter's estimation routes too (see docs/TODO.md).
+# Middleware added later runs outermost, so this order makes
+# HTTPSRedirect -> SecurityHeaders -> AuditLog -> CORS -> routes.
+app.add_middleware(AuditLogMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(HTTPSRedirectMiddleware)
 
 # Include routers
 app.include_router(estimates_router, prefix="/api/v1")
